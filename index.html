@@ -1,125 +1,184 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>P2P Card Game</title>
+  <title>Card Game Hub</title>
   <style>
-    body { font-family: Arial; background:#1e1e2f; color:white; text-align:center; }
-    textarea { width:90%; height:100px; margin:10px; }
-    button { padding:10px; margin:5px; border:none; border-radius:8px; background:#4CAF50; color:white; }
+    body {
+      font-family: Arial;
+      background: #1e1e2f;
+      color: white;
+      text-align: center;
+    }
+    .card {
+      display: inline-block;
+      margin: 5px;
+      cursor: pointer;
+    }
+    img {
+      width: 80px;
+      border-radius: 8px;
+    }
+    #log {
+      margin-top: 15px;
+      min-height: 100px;
+    }
   </style>
 </head>
 <body>
 
-<h1>🎴 P2P Card Game (WebRTC)</h1>
+<h1>🎴 Go Fish</h1>
+<h3>Your Turn: Click a card rank to ask</h3>
 
-<button onclick="createGame()">Create Game</button>
-<button onclick="joinGame()">Join Game</button>
+<div id="playerHand"></div>
 
-<div id="connection"></div>
-<div id="game"></div>
+<h3>Bot Cards: <span id="botCount"></span></h3>
+
+<div id="log"></div>
 
 <script>
-let pc = new RTCPeerConnection({
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-});
+let deck = [];
+let player = [];
+let bot = [];
+let playerBooks = 0;
+let botBooks = 0;
 
-let channel;
+// Create deck using API images
+const suits = ["S", "H", "D", "C"];
+const values = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
 
-function createGame() {
-  channel = pc.createDataChannel("game");
+function createDeck() {
+  deck = [];
+  for (let suit of suits) {
+    for (let value of values) {
+      deck.push({
+        value,
+        code: value + suit,
+        img: `https://deckofcardsapi.com/static/img/${value}${suit}.png`
+      });
+    }
+  }
+  shuffle(deck);
+}
 
-  setupChannel();
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    let j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
 
-  pc.createOffer().then(offer => {
-    pc.setLocalDescription(offer);
-    setTimeout(() => {
-      document.getElementById("connection").innerHTML = `
-        <h3>Send this code to friend:</h3>
-        <textarea>${JSON.stringify(pc.localDescription)}</textarea>
-        <h3>Paste answer:</h3>
-        <textarea id="answer"></textarea>
-        <button onclick="submitAnswer()">Connect</button>
-      `;
-    }, 1000);
+// Deal cards
+function deal() {
+  for (let i = 0; i < 7; i++) {
+    player.push(deck.pop());
+    bot.push(deck.pop());
+  }
+}
+
+// Render player hand
+function render() {
+  let html = "";
+  player.forEach(card => {
+    html += `<img class="card" src="${card.img}" onclick="ask('${card.value}')">`;
   });
+  document.getElementById("playerHand").innerHTML = html;
+  document.getElementById("botCount").innerText = bot.length;
 }
 
-function submitAnswer() {
-  let answer = JSON.parse(document.getElementById("answer").value);
-  pc.setRemoteDescription(answer);
+// Ask for card
+function ask(value) {
+  let matches = bot.filter(c => c.value === value);
+
+  if (matches.length > 0) {
+    log("Bot had " + matches.length + " " + value + "(s)!");
+    player.push(...matches);
+    bot = bot.filter(c => c.value !== value);
+    checkBooks(player, "player");
+  } else {
+    log("Go Fish!");
+    draw(player);
+    botTurn();
+  }
+
+  render();
 }
 
-function joinGame() {
-  document.getElementById("connection").innerHTML = `
-    <h3>Paste host code:</h3>
-    <textarea id="offer"></textarea>
-    <button onclick="submitOffer()">Continue</button>
-  `;
+// Bot turn
+function botTurn() {
+  setTimeout(() => {
+    if (bot.length === 0) return;
+
+    let choice = bot[Math.floor(Math.random() * bot.length)].value;
+    let matches = player.filter(c => c.value === choice);
+
+    if (matches.length > 0) {
+      log("Bot took your " + choice + "!");
+      bot.push(...matches);
+      player = player.filter(c => c.value !== choice);
+      checkBooks(bot, "bot");
+      botTurn(); // goes again
+    } else {
+      log("Bot goes fishing...");
+      draw(bot);
+    }
+
+    render();
+  }, 1000);
 }
 
-function submitOffer() {
-  let offer = JSON.parse(document.getElementById("offer").value);
+// Draw card
+function draw(hand) {
+  if (deck.length > 0) {
+    hand.push(deck.pop());
+  }
+}
 
-  pc.setRemoteDescription(offer);
-
-  pc.ondatachannel = (event) => {
-    channel = event.channel;
-    setupChannel();
-  };
-
-  pc.createAnswer().then(answer => {
-    pc.setLocalDescription(answer);
-    setTimeout(() => {
-      document.getElementById("connection").innerHTML = `
-        <h3>Send this back to host:</h3>
-        <textarea>${JSON.stringify(pc.localDescription)}</textarea>
-      `;
-    }, 1000);
+// Check for books (4 of a kind)
+function checkBooks(hand, owner) {
+  let counts = {};
+  hand.forEach(c => {
+    counts[c.value] = (counts[c.value] || 0) + 1;
   });
+
+  for (let value in counts) {
+    if (counts[value] === 4) {
+      log(owner + " made a book of " + value + "!");
+      if (owner === "player") playerBooks++;
+      else botBooks++;
+
+      // remove cards
+      if (owner === "player") {
+        player = player.filter(c => c.value !== value);
+      } else {
+        bot = bot.filter(c => c.value !== value);
+      }
+    }
+  }
+
+  checkWin();
 }
 
-function setupChannel() {
-  channel.onopen = () => {
-    document.getElementById("connection").innerHTML = "<h2>Connected ✅</h2>";
-    startGame();
-  };
-
-  channel.onmessage = (event) => {
-    receiveMove(event.data);
-  };
-}
-
-/* -------- SIMPLE GAME (DEMO) -------- */
-
-let myTurn = false;
-
-function startGame() {
-  document.getElementById("game").innerHTML = `
-    <h2>Simple Card Demo</h2>
-    <button onclick="playCard('A')">Play A</button>
-    <button onclick="playCard('K')">Play K</button>
-    <p id="log"></p>
-  `;
-
-  myTurn = true;
-}
-
-function playCard(card) {
-  if (!myTurn) return alert("Not your turn!");
-  
-  log("You played " + card);
-  channel.send(card);
-  myTurn = false;
-}
-
-function receiveMove(card) {
-  log("Opponent played " + card);
-  myTurn = true;
+// Win check
+function checkWin() {
+  if (deck.length === 0) {
+    if (playerBooks > botBooks) {
+      log("🎉 You win!");
+    } else if (botBooks > playerBooks) {
+      log("Bot wins!");
+    } else {
+      log("It's a tie!");
+    }
+  }
 }
 
 function log(text) {
   document.getElementById("log").innerHTML += text + "<br>";
 }
+
+// Start game
+createDeck();
+deal();
+render();
 </script>
 
 </body>
