@@ -1,160 +1,124 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Card Game Hub</title>
+  <title>P2P Card Game</title>
   <style>
-    body {
-      font-family: Arial;
-      background: #1e1e2f;
-      color: white;
-      text-align: center;
-    }
-    button {
-      padding: 10px 20px;
-      margin: 10px;
-      border: none;
-      border-radius: 8px;
-      background: #4CAF50;
-      color: white;
-      cursor: pointer;
-    }
-    #gameArea {
-      margin-top: 20px;
-    }
-    input {
-      padding: 8px;
-      border-radius: 5px;
-      border: none;
-    }
+    body { font-family: Arial; background:#1e1e2f; color:white; text-align:center; }
+    textarea { width:90%; height:100px; margin:10px; }
+    button { padding:10px; margin:5px; border:none; border-radius:8px; background:#4CAF50; color:white; }
   </style>
 </head>
 <body>
 
-<h1>🎴 Card Game Hub</h1>
+<h1>🎴 P2P Card Game (WebRTC)</h1>
 
-<div id="menu">
-  <h2>Select a Game</h2>
-  <button onclick="selectGame('gofish')">Go Fish</button>
-  <button onclick="selectGame('spades')">Spades</button>
-  <button onclick="selectGame('hearts')">Hearts</button>
-  <button onclick="selectGame('solitaire')">Solitaire</button>
-</div>
+<button onclick="createGame()">Create Game</button>
+<button onclick="joinGame()">Join Game</button>
 
-<div id="modeSelect" style="display:none;">
-  <h2>Choose Mode</h2>
-  <button onclick="startBotGame()">Play vs Bots</button>
-  <button onclick="showMultiplayer()">Play Online</button>
-</div>
-
-<div id="multiplayer" style="display:none;">
-  <h2>Multiplayer</h2>
-  <input id="roomCode" placeholder="Enter Room Code">
-  <br>
-  <button onclick="createRoom()">Create Room</button>
-  <button onclick="joinRoom()">Join Room</button>
-  <p id="roomDisplay"></p>
-</div>
-
-<div id="gameArea"></div>
-
-<!-- Firebase -->
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js"></script>
+<div id="connection"></div>
+<div id="game"></div>
 
 <script>
-let selectedGame = "";
+let pc = new RTCPeerConnection({
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+});
 
-// 🔥 REPLACE WITH YOUR FIREBASE CONFIG
-const firebaseConfig = {
-  apiKey: "YOUR_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT.firebaseio.com",
-  projectId: "YOUR_PROJECT",
-};
+let channel;
 
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
+function createGame() {
+  channel = pc.createDataChannel("game");
 
-function selectGame(game) {
-  selectedGame = game;
-  document.getElementById("menu").style.display = "none";
-  document.getElementById("modeSelect").style.display = "block";
+  setupChannel();
+
+  pc.createOffer().then(offer => {
+    pc.setLocalDescription(offer);
+    setTimeout(() => {
+      document.getElementById("connection").innerHTML = `
+        <h3>Send this code to friend:</h3>
+        <textarea>${JSON.stringify(pc.localDescription)}</textarea>
+        <h3>Paste answer:</h3>
+        <textarea id="answer"></textarea>
+        <button onclick="submitAnswer()">Connect</button>
+      `;
+    }, 1000);
+  });
 }
 
-function startBotGame() {
-  document.getElementById("modeSelect").style.display = "none";
-  document.getElementById("gameArea").innerHTML =
-    "<h2>Playing " + selectedGame + " vs Bots</h2>";
+function submitAnswer() {
+  let answer = JSON.parse(document.getElementById("answer").value);
+  pc.setRemoteDescription(answer);
+}
+
+function joinGame() {
+  document.getElementById("connection").innerHTML = `
+    <h3>Paste host code:</h3>
+    <textarea id="offer"></textarea>
+    <button onclick="submitOffer()">Continue</button>
+  `;
+}
+
+function submitOffer() {
+  let offer = JSON.parse(document.getElementById("offer").value);
+
+  pc.setRemoteDescription(offer);
+
+  pc.ondatachannel = (event) => {
+    channel = event.channel;
+    setupChannel();
+  };
+
+  pc.createAnswer().then(answer => {
+    pc.setLocalDescription(answer);
+    setTimeout(() => {
+      document.getElementById("connection").innerHTML = `
+        <h3>Send this back to host:</h3>
+        <textarea>${JSON.stringify(pc.localDescription)}</textarea>
+      `;
+    }, 1000);
+  });
+}
+
+function setupChannel() {
+  channel.onopen = () => {
+    document.getElementById("connection").innerHTML = "<h2>Connected ✅</h2>";
+    startGame();
+  };
+
+  channel.onmessage = (event) => {
+    receiveMove(event.data);
+  };
+}
+
+/* -------- SIMPLE GAME (DEMO) -------- */
+
+let myTurn = false;
+
+function startGame() {
+  document.getElementById("game").innerHTML = `
+    <h2>Simple Card Demo</h2>
+    <button onclick="playCard('A')">Play A</button>
+    <button onclick="playCard('K')">Play K</button>
+    <p id="log"></p>
+  `;
+
+  myTurn = true;
+}
+
+function playCard(card) {
+  if (!myTurn) return alert("Not your turn!");
   
-  if (selectedGame === "gofish") startGoFish();
+  log("You played " + card);
+  channel.send(card);
+  myTurn = false;
 }
 
-function showMultiplayer() {
-  document.getElementById("modeSelect").style.display = "none";
-  document.getElementById("multiplayer").style.display = "block";
+function receiveMove(card) {
+  log("Opponent played " + card);
+  myTurn = true;
 }
 
-function createRoom() {
-  const code = Math.random().toString(36).substring(2, 7).toUpperCase();
-  db.ref("rooms/" + code).set({
-    game: selectedGame,
-    players: 1,
-    state: {}
-  });
-  document.getElementById("roomDisplay").innerText = "Room Code: " + code;
-}
-
-function joinRoom() {
-  const code = document.getElementById("roomCode").value.toUpperCase();
-  const roomRef = db.ref("rooms/" + code);
-
-  roomRef.once("value", (snap) => {
-    if (snap.exists()) {
-      roomRef.update({
-        players: snap.val().players + 1
-      });
-      document.getElementById("roomDisplay").innerText =
-        "Joined Room: " + code;
-      startMultiplayerGame(code);
-    } else {
-      alert("Room not found!");
-    }
-  });
-}
-
-function startMultiplayerGame(code) {
-  document.getElementById("multiplayer").style.display = "none";
-  document.getElementById("gameArea").innerHTML =
-    "<h2>Multiplayer " + selectedGame + " (Room: " + code + ")</h2>";
-
-  // Listen for updates
-  db.ref("rooms/" + code).on("value", (snap) => {
-    console.log("Game update:", snap.val());
-  });
-}
-
-/* -----------------------
-   SIMPLE GO FISH (BOT)
------------------------ */
-function startGoFish() {
-  let playerCards = ["A", "K", "Q", "J", "10"];
-  let botCards = ["9", "8", "7", "6", "5"];
-
-  renderGoFish(playerCards, botCards);
-}
-
-function renderGoFish(player, bot) {
-  let html = "<h3>Your Cards:</h3>";
-
-  player.forEach(card => {
-    html += `<button onclick="askCard('${card}')">${card}</button>`;
-  });
-
-  document.getElementById("gameArea").innerHTML = html;
-}
-
-function askCard(card) {
-  alert("You asked for " + card + "! (Game logic placeholder)");
+function log(text) {
+  document.getElementById("log").innerHTML += text + "<br>";
 }
 </script>
 
