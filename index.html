@@ -1,100 +1,161 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Message</title>
+  <title>Card Game Hub</title>
   <style>
     body {
-      background: black;
-      color: red;
-      font-family: monospace;
+      font-family: Arial;
+      background: #1e1e2f;
+      color: white;
       text-align: center;
-      margin-top: 20%;
     }
-
-    #town {
-      font-size: 2em;
-      border-right: 2px solid red;
-      display: inline-block;
-      padding-right: 6px;
-      animation: blink 1s infinite;
+    button {
+      padding: 10px 20px;
+      margin: 10px;
+      border: none;
+      border-radius: 8px;
+      background: #4CAF50;
+      color: white;
+      cursor: pointer;
     }
-
-    #message {
-      font-size: 3em;
+    #gameArea {
       margin-top: 20px;
-      opacity: 0;
-      transition: opacity 2s;
     }
-
-    @keyframes blink {
-      50% { border-color: transparent; }
+    input {
+      padding: 8px;
+      border-radius: 5px;
+      border: none;
     }
   </style>
 </head>
 <body>
 
-<div id="town">Locating...</div>
-<div id="message">I will find you</div>
+<h1>🎴 Card Game Hub</h1>
+
+<div id="menu">
+  <h2>Select a Game</h2>
+  <button onclick="selectGame('gofish')">Go Fish</button>
+  <button onclick="selectGame('spades')">Spades</button>
+  <button onclick="selectGame('hearts')">Hearts</button>
+  <button onclick="selectGame('solitaire')">Solitaire</button>
+</div>
+
+<div id="modeSelect" style="display:none;">
+  <h2>Choose Mode</h2>
+  <button onclick="startBotGame()">Play vs Bots</button>
+  <button onclick="showMultiplayer()">Play Online</button>
+</div>
+
+<div id="multiplayer" style="display:none;">
+  <h2>Multiplayer</h2>
+  <input id="roomCode" placeholder="Enter Room Code">
+  <br>
+  <button onclick="createRoom()">Create Room</button>
+  <button onclick="joinRoom()">Join Room</button>
+  <p id="roomDisplay"></p>
+</div>
+
+<div id="gameArea"></div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js"></script>
 
 <script>
-  function typeText(el, text, speed = 80, done) {
-    el.textContent = "";
-    let i = 0;
+let selectedGame = "";
 
-    function step() {
-      if (i < text.length) {
-        el.textContent += text[i++];
-        setTimeout(step, speed);
-      } else if (done) {
-        done();
-      }
-    }
-    step();
-  }
+// 🔥 REPLACE WITH YOUR FIREBASE CONFIG
+const firebaseConfig = {
+  apiKey: "YOUR_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT.firebaseio.com",
+  projectId: "YOUR_PROJECT",
+};
 
-  function show(position) {
-    const lat = position.coords.latitude;
-    const lon = position.coords.longitude;
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
 
-    // More reliable reverse geocode (OpenStreetMap Nominatim)
-    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
-      .then(r => r.json())
-      .then(data => {
-        const addr = data.address || {};
+function selectGame(game) {
+  selectedGame = game;
+  document.getElementById("menu").style.display = "none";
+  document.getElementById("modeSelect").style.display = "block";
+}
 
-        const town =
-          addr.city ||
-          addr.town ||
-          addr.village ||
-          addr.hamlet ||
-          addr.county ||
-          addr.state ||
-          "your location";
+function startBotGame() {
+  document.getElementById("modeSelect").style.display = "none";
+  document.getElementById("gameArea").innerHTML =
+    "<h2>Playing " + selectedGame + " vs Bots</h2>";
+  
+  if (selectedGame === "gofish") startGoFish();
+}
 
-        typeText(document.getElementById("town"), town, 90, () => {
-          setTimeout(() => {
-            document.getElementById("message").style.opacity = 1;
-          }, 800);
-        });
-      })
-      .catch(() => {
-        typeText(document.getElementById("town"), "Location found", 90, () => {
-          document.getElementById("message").style.opacity = 1;
-        });
-      });
-  }
+function showMultiplayer() {
+  document.getElementById("modeSelect").style.display = "none";
+  document.getElementById("multiplayer").style.display = "block";
+}
 
-  function error() {
-    typeText(document.getElementById("town"), "Permission denied", 90, () => {
-      document.getElementById("message").style.opacity = 1;
-    });
-  }
-
-  navigator.geolocation.getCurrentPosition(show, error, {
-    enableHighAccuracy: true,
-    timeout: 10000
+function createRoom() {
+  const code = Math.random().toString(36).substring(2, 7).toUpperCase();
+  db.ref("rooms/" + code).set({
+    game: selectedGame,
+    players: 1,
+    state: {}
   });
+  document.getElementById("roomDisplay").innerText = "Room Code: " + code;
+}
+
+function joinRoom() {
+  const code = document.getElementById("roomCode").value.toUpperCase();
+  const roomRef = db.ref("rooms/" + code);
+
+  roomRef.once("value", (snap) => {
+    if (snap.exists()) {
+      roomRef.update({
+        players: snap.val().players + 1
+      });
+      document.getElementById("roomDisplay").innerText =
+        "Joined Room: " + code;
+      startMultiplayerGame(code);
+    } else {
+      alert("Room not found!");
+    }
+  });
+}
+
+function startMultiplayerGame(code) {
+  document.getElementById("multiplayer").style.display = "none";
+  document.getElementById("gameArea").innerHTML =
+    "<h2>Multiplayer " + selectedGame + " (Room: " + code + ")</h2>";
+
+  // Listen for updates
+  db.ref("rooms/" + code).on("value", (snap) => {
+    console.log("Game update:", snap.val());
+  });
+}
+
+/* -----------------------
+   SIMPLE GO FISH (BOT)
+----------------------- */
+function startGoFish() {
+  let playerCards = ["A", "K", "Q", "J", "10"];
+  let botCards = ["9", "8", "7", "6", "5"];
+
+  renderGoFish(playerCards, botCards);
+}
+
+function renderGoFish(player, bot) {
+  let html = "<h3>Your Cards:</h3>";
+
+  player.forEach(card => {
+    html += `<button onclick="askCard('${card}')">${card}</button>`;
+  });
+
+  document.getElementById("gameArea").innerHTML = html;
+}
+
+function askCard(card) {
+  alert("You asked for " + card + "! (Game logic placeholder)");
+}
 </script>
 
 </body>
