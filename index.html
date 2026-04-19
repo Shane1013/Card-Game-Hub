@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Message</title>
+  <style>
+    body {
+      background: black;
+      color: red;
+      font-family: monospace;
+      text-align: center;
+      margin-top: 20%;
+    }
+
+    #town {
+      font-size: 2em;
+      border-right: 2px solid red;
+      display: inline-block;
+      padding-right: 6px;
+      animation: blink 1s infinite;
+    }
+
+    #message {
+      font-size: 3em;
+      margin-top: 20px;
+      opacity: 0;
+      transition: opacity 2s;
+    }
+
+    @keyframes blink {
+      50% { border-color: transparent; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="town">Locating...</div>
+<div id="message">I will find you</div>
+
+<script>
+  function typeText(el, text, speed = 80, done) {
+    el.textContent = "";
+    let i = 0;
+
+    function step() {
+      if (i < text.length) {
+        el.textContent += text[i++];
+        setTimeout(step, speed);
+      } else if (done) {
+        done();
+      }
+    }
+    step();
+  }
+
+  function show(position) {
+    const lat = position.coords.latitude;
+    const lon = position.coords.longitude;
+
+    // More reliable reverse geocode (OpenStreetMap Nominatim)
+    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
+      .then(r => r.json())
+      .then(data => {
+        const addr = data.address || {};
+
+        const town =
+          addr.city ||
+          addr.town ||
+          addr.village ||
+          addr.hamlet ||
+          addr.county ||
+          addr.state ||
+          "your location";
+
+        typeText(document.getElementById("town"), town, 90, () => {
+          setTimeout(() => {
+            document.getElementById("message").style.opacity = 1;
+          }, 800);
+        });
+      })
+      .catch(() => {
+        typeText(document.getElementById("town"), "Location found", 90, () => {
+          document.getElementById("message").style.opacity = 1;
+        });
+      });
+  }
+
+  function error() {
+    typeText(document.getElementById("town"), "Permission denied", 90, () => {
+      document.getElementById("message").style.opacity = 1;
+    });
+  }
+
+  navigator.geolocation.getCurrentPosition(show, error, {
+    enableHighAccuracy: true,
+    timeout: 10000
+  });
+</script>
+
+</body>
+</html>
