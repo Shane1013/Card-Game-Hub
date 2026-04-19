@@ -1,3 +1,3 @@
-# broma-divertida
-broma divertida
-WARNING: THIS IS A PRANK, I DO NOT GET YOUR LOCATION NOR ANY OTHER PROGRAM THIS SITE IS JUST A PRANK FOR YOUR FRIENDS! Thank you :)
+# Card Game Hub
+This is a bunch of card games in one!
+Link:
