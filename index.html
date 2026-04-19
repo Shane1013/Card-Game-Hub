@@ -1,176 +1,261 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Card Game Hub</title>
-  <style>
-    body { font-family: Arial; background:#1e1e2f; color:white; text-align:center; }
-    img { width:70px; margin:4px; cursor:pointer; }
-    textarea { width:90%; height:90px; margin:10px; }
-    button { padding:10px; margin:5px; border:none; border-radius:8px; background:#4CAF50; color:white; }
-  </style>
+<title>Go Fish P2P+</title>
+<style>
+body {
+  background:#0f172a;
+  color:white;
+  font-family:Arial;
+  text-align:center;
+}
+
+#menu button {
+  padding:10px;
+  margin:5px;
+  border-radius:8px;
+  background:#22c55e;
+  border:none;
+  cursor:pointer;
+}
+
+.card {
+  width:70px;
+  transition:0.2s;
+}
+.card:hover {
+  transform: translateY(-10px) scale(1.1);
+}
+
+.hand {
+  margin:15px;
+}
+
+.group {
+  display:inline-block;
+  margin:5px;
+  padding:5px;
+  background:#1e293b;
+  border-radius:10px;
+}
+
+textarea {
+  width:90%;
+  height:80px;
+}
+
+#log {
+  margin-top:10px;
+  min-height:80px;
+  font-size:14px;
+}
+</style>
 </head>
 <body>
 
-<h1>Card Game Hub</h1>
+<h1>🎴 Go Fish (3–4 Player P2P)</h1>
 
-<button onclick="hostGame()">Host</button>
-<button onclick="joinGame()">Join</button>
+<div id="menu">
+  <button onclick="host()">Host</button>
+  <button onclick="join()">Join</button>
+</div>
 
 <div id="connect"></div>
 <div id="game"></div>
+<div id="log"></div>
 
 <script>
-let pc = new RTCPeerConnection({
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-});
-let channel;
-let isHost = false;
+let peers = [];
+let channels = [];
+let isHost=false;
+let playerIndex=0;
 
 /* ---------- CONNECTION ---------- */
 
-function hostGame() {
-  isHost = true;
-  channel = pc.createDataChannel("game");
-  setupChannel();
+function createPeer(){
+  return new RTCPeerConnection({
+    iceServers:[{urls:"stun:stun.l.google.com:19302"}]
+  });
+}
 
-  pc.createOffer().then(o => {
+function host(){
+  isHost=true;
+  addPlayer();
+}
+
+function addPlayer(){
+  let pc=createPeer();
+  let ch=pc.createDataChannel("game");
+
+  setupChannel(ch);
+  peers.push(pc);
+  channels.push(ch);
+
+  pc.createOffer().then(o=>{
     pc.setLocalDescription(o);
-    setTimeout(() => {
-      document.getElementById("connect").innerHTML = `
-        <p>Send this to friend:</p>
-        <textarea>${JSON.stringify(pc.localDescription)}</textarea>
-        <p>Paste answer:</p>
-        <textarea id="ans"></textarea>
-        <button onclick="finishHost()">Connect</button>
+    setTimeout(()=>{
+      document.getElementById("connect").innerHTML += `
+      <p>Send this to player ${channels.length}:</p>
+      <textarea>${JSON.stringify(pc.localDescription)}</textarea>
+      <textarea id="ans${channels.length}"></textarea>
+      <button onclick="finishHost(${channels.length-1})">Connect</button>
       `;
-    }, 1000);
+    },500);
   });
 }
 
-function finishHost() {
-  pc.setRemoteDescription(JSON.parse(ans.value));
+function finishHost(i){
+  let ans=document.getElementById("ans"+(i+1)).value;
+  peers[i].setRemoteDescription(JSON.parse(ans));
 }
 
-function joinGame() {
-  document.getElementById("connect").innerHTML = `
-    <p>Paste host code:</p>
+function join(){
+  let pc=createPeer();
+
+  document.getElementById("connect").innerHTML=`
     <textarea id="offer"></textarea>
-    <button onclick="finishJoin()">Continue</button>
+    <button onclick="finishJoin()">Join</button>
   `;
-}
 
-function finishJoin() {
-  pc.setRemoteDescription(JSON.parse(offer.value));
+  window.finishJoin=()=>{
+    pc.setRemoteDescription(JSON.parse(offer.value));
 
-  pc.ondatachannel = e => {
-    channel = e.channel;
-    setupChannel();
-  };
+    pc.ondatachannel=e=>{
+      let ch=e.channel;
+      setupChannel(ch);
+      channels.push(ch);
+    };
 
-  pc.createAnswer().then(a => {
-    pc.setLocalDescription(a);
-    setTimeout(() => {
-      document.getElementById("connect").innerHTML = `
-        <p>Send this back:</p>
+    pc.createAnswer().then(a=>{
+      pc.setLocalDescription(a);
+      setTimeout(()=>{
+        document.getElementById("connect").innerHTML=`
         <textarea>${JSON.stringify(pc.localDescription)}</textarea>
-      `;
-    }, 1000);
-  });
+        `;
+      },500);
+    });
+  };
+
+  peers.push(pc);
 }
 
-function setupChannel() {
-  channel.onopen = () => {
-    document.getElementById("connect").innerHTML = "<h2>Connected ✅</h2>";
-    startGame();
+function setupChannel(ch){
+  ch.onopen=()=>{
+    document.getElementById("menu").style.display="none";
+    log("Connected!");
+    if(isHost) startGame();
   };
-  channel.onmessage = e => receive(JSON.parse(e.data));
+
+  ch.onmessage=e=>{
+    let msg=JSON.parse(e.data);
+    if(msg.type==="state"){
+      state=msg.state;
+      render();
+    }
+  };
 }
 
 /* ---------- GAME ---------- */
 
-let state = {
-  deck: [],
-  hands: [[], []],
-  books: [0,0],
-  turn: 0
+let state={
+  deck:[],
+  hands:[],
+  books:[],
+  turn:0
 };
 
-const suits = ["S","H","D","C"];
-const vals = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+const suits=["S","H","D","C"];
+const vals=["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
 
-function initDeck() {
+function img(v,s){
+  return `https://deckofcardsapi.com/static/img/${v==="10"?"0":v}${s}.png`;
+}
+
+function initDeck(){
   let d=[];
-  for (let s of suits)
-    for (let v of vals)
-      d.push({v, img:`https://deckofcardsapi.com/static/img/${v}${s}.png`});
+  for(let s of suits)
+    for(let v of vals)
+      d.push({v,s,img:img(v,s)});
   return shuffle(d);
 }
 
 function shuffle(a){
   for(let i=a.length-1;i>0;i--){
-    let j=Math.floor(Math.random()* (i+1));
+    let j=Math.random()* (i+1)|0;
     [a[i],a[j]]=[a[j],a[i]];
   }
   return a;
 }
 
-function startGame() {
-  if (isHost) {
-    state.deck = initDeck();
-    for (let i=0;i<7;i++){
-      state.hands[0].push(state.deck.pop());
-      state.hands[1].push(state.deck.pop());
-    }
-    sendState();
+function startGame(){
+  state.deck=initDeck();
+  let playerCount=channels.length+1;
+
+  state.hands=[];
+  state.books=[];
+  for(let i=0;i<playerCount;i++){
+    state.hands.push([]);
+    state.books.push(0);
   }
+
+  for(let i=0;i<5;i++){
+    for(let p=0;p<playerCount;p++){
+      state.hands[p].push(state.deck.pop());
+    }
+  }
+
+  broadcast();
   render();
 }
 
-function sendState(){
-  channel.send(JSON.stringify({type:"state",state}));
-}
-
-function receive(msg){
-  if(msg.type==="state"){
-    state = msg.state;
-    render();
-  }
+function broadcast(){
+  channels.forEach(c=>c.send(JSON.stringify({type:"state",state})));
 }
 
 /* ---------- GAMEPLAY ---------- */
 
-function myIndex(){
-  return isHost ? 0 : 1;
-}
-function oppIndex(){
-  return isHost ? 1 : 0;
+function my(){
+  return isHost?0:1; // simplified
 }
 
-function ask(value){
-  if(state.turn !== myIndex()) return alert("Not your turn!");
+function ask(v){
+  if(state.turn!==my()) return;
 
-  let opp = state.hands[oppIndex()];
-  let mine = state.hands[myIndex()];
+  let target=(my()+1)%state.hands.length;
+  let opp=state.hands[target];
+  let mine=state.hands[my()];
 
-  let matches = opp.filter(c=>c.v===value);
+  let matches=opp.filter(c=>c.v===v);
 
   if(matches.length){
     mine.push(...matches);
-    state.hands[oppIndex()] = opp.filter(c=>c.v!==value);
+    state.hands[target]=opp.filter(c=>c.v!==v);
     log("Got cards!");
-    checkBooks(myIndex());
-  } else {
-    log("Go Fish!");
+  }else{
     if(state.deck.length) mine.push(state.deck.pop());
-    state.turn = oppIndex();
+    state.turn=target;
   }
 
-  sendState();
+  checkBooks(my());
+  broadcast();
   render();
 }
 
+function placeSet(v){
+  let mine=state.hands[my()];
+  let cards=mine.filter(c=>c.v===v);
+
+  if(cards.length>=3){
+    state.hands[my()]=mine.filter(c=>c.v!==v);
+    state.books[my()]++;
+    log("Placed set of "+v);
+    broadcast();
+    render();
+  }
+}
+
 function checkBooks(i){
-  let hand = state.hands[i];
+  let hand=state.hands[i];
   let count={};
   hand.forEach(c=>count[c.v]=(count[c.v]||0)+1);
 
@@ -178,28 +263,44 @@ function checkBooks(i){
     if(count[v]===4){
       state.hands[i]=hand.filter(c=>c.v!==v);
       state.books[i]++;
-      log("Book of "+v);
+      log("Auto book "+v);
     }
   }
 }
 
+/* ---------- UI ---------- */
+
 function render(){
-  let me = state.hands[myIndex()] || [];
-  let html = `<h3>Your turn: ${state.turn===myIndex()}</h3>`;
-  
-  me.forEach(c=>{
-    html += `<img src="${c.img}" onclick="ask('${c.v}')">`;
+  let mine=state.hands[my()]||[];
+
+  // group cards
+  let groups={};
+  mine.forEach(c=>{
+    if(!groups[c.v]) groups[c.v]=[];
+    groups[c.v].push(c);
   });
 
-  html += `<p>Your books: ${state.books[myIndex()]}</p>`;
-  html += `<p>Opponent books: ${state.books[oppIndex()]}</p>`;
-  html += `<p>Opponent cards: ${state.hands[oppIndex()]?.length || 0}</p>`;
+  let html=`<h3>Turn: Player ${state.turn+1}</h3>`;
 
-  document.getElementById("game").innerHTML = html;
+  for(let v in groups){
+    html+=`<div class="group">`;
+    groups[v].forEach(c=>{
+      html+=`<img class="card" src="${c.img}" onclick="ask('${v}')">`;
+    });
+    if(groups[v].length>=3){
+      html+=`<br><button onclick="placeSet('${v}')">Place Set</button>`;
+    }
+    html+=`</div>`;
+  }
+
+  html+=`<p>Your books: ${state.books[my()]}</p>`;
+  html+=`<p>Deck: ${state.deck.length}</p>`;
+
+  document.getElementById("game").innerHTML=html;
 }
 
 function log(t){
-  document.getElementById("game").innerHTML += "<br>"+t;
+  document.getElementById("log").innerHTML+=t+"<br>";
 }
 </script>
 
